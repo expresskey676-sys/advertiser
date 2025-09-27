@@ -574,20 +574,16 @@ function TPReturner()
 end
 
 function Teleport()
-	local lastHop = tick()
-	while true do
-		if tick() - lastHop >= 300 then -- 5 minutes
-			pcall(function()
+	while task.wait(300) do -- every 5 minutes
+		pcall(function()
+			TPReturner()
+			if foundAnything ~= '' then
 				TPReturner()
-				if foundAnything ~= "" then
-					TPReturner()
-				end
-			end)
-			lastHop = tick()
-		end
-		task.wait(1)
+			end
+		end)
 	end
 end
+
 task.spawn(Teleport)
 
 print(
