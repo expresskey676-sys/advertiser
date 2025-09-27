@@ -76,7 +76,6 @@ local function buyAtPosition(pos, times)
 		return
 	end
 
-	-- Wait until shop exists
 	local shop
 	repeat
 		shop = workspace:FindFirstChild('Ignored')
@@ -149,7 +148,7 @@ local function getAmmo()
 	return 0
 end
 
--- Original reload method (non-blocking)
+-- Original reload method
 local function reloadIfNeeded()
 	if getAmmo() > 0 then
 		return
@@ -167,22 +166,24 @@ local function reloadIfNeeded()
 		end)
 		task.wait(5)
 		if getAmmo() == 0 then
-			buyAtPosition(ammoPos, 1)
+			-- only buy ammo if LMG exists
+			if
+				lp.Backpack:FindFirstChild(weaponName)
+				or (lp.Character and lp.Character:FindFirstChild(weaponName))
+			then
+				buyAtPosition(ammoPos, 1)
+			end
 		end
 	end)
 end
 
--- Blocking reload+buy used while orbiting to pause orbit until resolved
+-- Blocking reload+buy while orbiting
 local function reloadAndBuyBlocking()
-	-- If already have ammo, quick return
 	if getAmmo() > 0 then
 		return true
 	end
-
-	-- Attempt to ensure weapon is equipped or bought
 	local tool = equipWeapon()
 	if not tool then
-		-- buy LMG first
 		buyAtPosition(lmgPos, 1)
 		task.wait(0.6)
 		tool = equipWeapon()
@@ -191,7 +192,6 @@ local function reloadAndBuyBlocking()
 		end
 	end
 
-	-- attempt reload
 	local vim = game:GetService('VirtualInputManager')
 	pcall(function()
 		vim:SendKeyEvent(true, Enum.KeyCode.R, false, game)
@@ -199,7 +199,6 @@ local function reloadAndBuyBlocking()
 		vim:SendKeyEvent(false, Enum.KeyCode.R, false, game)
 	end)
 
-	-- wait briefly for reload to register
 	local t0 = tick()
 	while tick() - t0 < 3 do
 		task.wait(0.25)
@@ -208,31 +207,22 @@ local function reloadAndBuyBlocking()
 		end
 	end
 
-	-- still no ammo -> buy ammo (but only if we have LMG)
+	-- Only buy ammo if LMG exists
 	if
-		not (
-			lp.Backpack:FindFirstChild(weaponName)
-			or (lp.Character and lp.Character:FindFirstChild(weaponName))
-		)
+		lp.Backpack:FindFirstChild(weaponName)
+		or (lp.Character and lp.Character:FindFirstChild(weaponName))
 	then
-		-- buy LMG first
-		buyAtPosition(lmgPos, 1)
+		buyAtPosition(ammoPos, 1)
 		task.wait(0.6)
+		equipWeapon()
 	end
 
-	-- buy ammo
-	buyAtPosition(ammoPos, 1)
-	task.wait(0.6)
-	-- re-equip and check
-	equipWeapon()
 	return getAmmo() > 0
 end
 
 -- Safe auto-buy: LMG first, then ammo if needed
 local function autoBuy()
 	local char, _, _ = getChar()
-
-	-- Buy LMG if missing
 	while
 		not (
 			lp.Backpack:FindFirstChild(weaponName)
@@ -244,7 +234,6 @@ local function autoBuy()
 		char = lp.Character or lp.CharacterAdded:Wait()
 	end
 
-	-- Buy ammo only if LMG exists and ammo is 0
 	local tool = char:FindFirstChild(weaponName)
 		or lp.Backpack:FindFirstChild(weaponName)
 	if tool and tool:FindFirstChild('Ammo') and tool.Ammo.Value == 0 then
@@ -297,13 +286,10 @@ task.spawn(function()
 	end
 end)
 
--- REPLACED ANTI-SEAT SCRIPT
---[[ WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk! ]]
+-- Anti-Sit
 loadstring(game:HttpGet('https://paste.myconan.net/573222.txt'))()
-
 local Workspace = game:GetService('Workspace')
 local player = Players.LocalPlayer
-
 local function neutralizarAsiento(asiento)
 	if asiento:IsA('Seat') or asiento:IsA('VehicleSeat') then
 		asiento.Disabled = true
@@ -311,18 +297,15 @@ local function neutralizarAsiento(asiento)
 		asiento:SetAttribute('Neutralizado', true)
 	end
 end
-
 for _, objeto in ipairs(Workspace:GetDescendants()) do
 	neutralizarAsiento(objeto)
 end
-
 Workspace.DescendantAdded:Connect(function(obj)
 	if obj:IsA('Seat') or obj:IsA('VehicleSeat') then
 		task.wait(0.1)
 		neutralizarAsiento(obj)
 	end
 end)
-
 player.CharacterAdded:Connect(function(char)
 	local humanoid = char:WaitForChild('Humanoid')
 	humanoid:GetPropertyChangedSignal('Sit'):Connect(function()
@@ -331,12 +314,10 @@ player.CharacterAdded:Connect(function(char)
 		end
 	end)
 end)
-
 print('Anti-sit is working.... Men.. I hate that chair...')
 
 -- Orbit + attack
 local function attackTarget(target)
-	-- begin attacking (pause other buying loops)
 	buying = true
 	local char, hrp = getChar()
 	local tool = equipWeapon()
@@ -351,36 +332,26 @@ local function attackTarget(target)
 		buying = false
 		return
 	end
-
 	chat(adMessages[math.random(1, #adMessages)])
-
 	local startTime = tick()
 	local shootDuration = 2
 	local angle = 0
-
 	while tick() - startTime < 10 do
 		if not tHum or not tHRP or not hrp then
 			break
 		end
-
-		-- If out of ammo, stop orbit, reload/buy, then resume
 		if getAmmo() <= 0 then
-			-- clear currentTarget while resolving
 			currentTarget = nil
-			-- Use blocking reload+buy so we pause orbit until resolved
 			local ok = reloadAndBuyBlocking()
-			-- if we couldn't obtain ammo, break out
 			if not ok then
 				break
 			end
-			-- re-equip tool and continue orbiting on same target
 			tool = equipWeapon()
 			if not tool then
 				break
 			end
 			currentTarget = target
 		end
-
 		angle = angle + orbitSpeed * 0.125
 		local pos = tHRP.Position
 		pcall(function()
@@ -393,7 +364,6 @@ local function attackTarget(target)
 				pos
 			)
 		end)
-
 		if tick() - startTime <= shootDuration and tHum.Health > 10 then
 			pcall(function()
 				tool:Activate()
@@ -401,10 +371,8 @@ local function attackTarget(target)
 		elseif tick() - startTime > shootDuration and tool.Parent == char then
 			unequipWeapon()
 		end
-
 		task.wait(0.01)
 	end
-
 	currentTarget = nil
 	buying = false
 end
@@ -433,7 +401,6 @@ local function resetTargetedIfNeeded()
 		targeted = {}
 	end
 end
-
 local function pickNextTarget()
 	resetTargetedIfNeeded()
 	local best, dist = nil, math.huge
@@ -479,7 +446,7 @@ task.spawn(function()
 	end
 end)
 
--- On respawn: wait for everything, buy if missing
+-- On respawn
 lp.CharacterAdded:Connect(function()
 	local char = lp.Character or lp.CharacterAdded:Wait()
 	repeat
@@ -491,9 +458,8 @@ lp.CharacterAdded:Connect(function()
 end)
 
 -----------------------------------------------------------------
--- Alternative Server Hop (option 2, 5 min delay, JSON system)
+-- Server Hop (your option 2, 5 min delay, JSON system)
 -----------------------------------------------------------------
-
 local PlaceID = game.PlaceId
 local AllIDs = {}
 local foundAnything = ''
@@ -547,7 +513,7 @@ function TPReturner()
 					end
 				else
 					if tonumber(actualHour) ~= tonumber(Existing) then
-						local delFile = pcall(function()
+						pcall(function()
 							delfile('NotSameServers.json')
 							AllIDs = {}
 							table.insert(AllIDs, actualHour)
@@ -583,7 +549,6 @@ function Teleport()
 		end)
 	end
 end
-
 task.spawn(Teleport)
 
 print(
