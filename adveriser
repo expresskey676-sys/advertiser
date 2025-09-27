@@ -1,0 +1,595 @@
+--// Auto LMG + Orbit + Silent Aim + Reload + Ads + Noclip + Auto-Jump + Limited Shooting + Anti-Stomp + Anti-Sit + Server Hop
+local Players = game:GetService('Players')
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local RunService = game:GetService('RunService')
+local HttpService = game:GetService('HttpService')
+local TeleportService = game:GetService('TeleportService')
+local lp = Players.LocalPlayer
+
+local lmgPos = CFrame.new(-620.882263, 20.2999878, -305.339264)
+local ammoPos = CFrame.new(-616.182312, 20.3000107, -305.339172)
+local weaponName = '[LMG]'
+
+getgenv().prediction = 0.135
+local orbitRadius = 6
+local orbitSpeed = 0.3
+
+local adMessages = {
+	'.           ⚡10 ꞅoხมӽ peꞅ 1mเ่Ɩ DHC Go ऽꜧׁׅop สt\n                         gg\\QuickDHC🔥',
+	'🔥ƭสऽt & Ɩegเ่t💰 10 ꞅoხมӽ peꞅ 1mเ่Ɩ DHC😍  gg\\QuickDHC🔥',
+	'.           💎10 ꞅoხมӽ peꞅ 1mเ่Ɩ DHC Go ऽꜧׁׅop สt\n                         gg\\QuickDHC⚡',
+}
+
+local function chat(msg)
+	local TextChatService = game:GetService('TextChatService')
+	if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+		TextChatService.TextChannels.RBXGeneral:SendAsync(msg)
+	else
+		ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(
+			msg,
+			'All'
+		)
+	end
+end
+
+-- Helpers
+local function getChar()
+	local char = lp.Character or lp.CharacterAdded:Wait()
+	local hrp = char:WaitForChild('HumanoidRootPart', 10)
+	local hum = char:FindFirstChildOfClass('Humanoid')
+	return char, hrp, hum
+end
+
+local buying = false
+
+-- Anti-Stomp (always active)
+RunService:BindToRenderStep('Anti-Stomp', 0, function()
+	local ok, char, hrp, hum = pcall(function()
+		return getChar()
+	end)
+	if ok and char and hum then
+		if hum.Health and hum.Health <= 5 then
+			for i, v in pairs(char:GetChildren()) do
+				if v:IsA('MeshPart') or v:IsA('Part') then
+					pcall(function()
+						v:Destroy()
+					end)
+				end
+			end
+			for i, v in pairs(char:GetChildren()) do
+				if v:IsA('Accessory') and v:FindFirstChild('Handle') then
+					pcall(function()
+						v.Handle:Destroy()
+					end)
+				end
+			end
+		end
+	end
+end)
+
+-- Buy a shop item
+local function buyAtPosition(pos, times)
+	buying = true
+	local char, hrp = getChar()
+	if not char or not hrp then
+		buying = false
+		return
+	end
+
+	-- Wait until shop exists
+	local shop
+	repeat
+		shop = workspace:FindFirstChild('Ignored')
+			and workspace.Ignored:FindFirstChild('Shop')
+		task.wait(0.2)
+	until shop
+
+	local closest, click, dist = nil, nil, math.huge
+	for _, item in ipairs(shop:GetChildren()) do
+		local part = item:FindFirstChildWhichIsA('BasePart')
+		local cd = item:FindFirstChildOfClass('ClickDetector')
+		if part and cd then
+			local d = (part.Position - pos.Position).Magnitude
+			if d < dist then
+				closest, click, dist = part, cd, d
+			end
+		end
+	end
+	if not closest or not click then
+		buying = false
+		return
+	end
+
+	local original = hrp.CFrame
+	for i = 1, times do
+		pcall(function()
+			local tool = char:FindFirstChildOfClass('Tool')
+			if tool then
+				tool.Parent = lp.Backpack
+			end
+		end)
+		hrp.CFrame = closest.CFrame + Vector3.new(0, 3, 0)
+		task.wait(0.15)
+		pcall(fireclickdetector, click)
+		task.wait(0.35)
+	end
+	hrp.CFrame = original
+	buying = false
+end
+
+-- Equip/unequip helper
+local function equipWeapon()
+	local char, _, hum = getChar()
+	local tool = char:FindFirstChild(weaponName)
+		or lp.Backpack:FindFirstChild(weaponName)
+	if tool and hum then
+		tool.Parent = char
+		pcall(function()
+			hum:EquipTool(tool)
+		end)
+	end
+	return tool
+end
+
+local function unequipWeapon()
+	local char, _, hum = getChar()
+	local tool = char:FindFirstChild(weaponName)
+	if tool then
+		tool.Parent = lp.Backpack
+	end
+end
+
+-- Get ammo helper
+local function getAmmo()
+	local tool = lp.Character and lp.Character:FindFirstChild(weaponName)
+		or lp.Backpack:FindFirstChild(weaponName)
+	if tool and tool:FindFirstChild('Ammo') then
+		return tool.Ammo.Value
+	end
+	return 0
+end
+
+-- Original reload method (non-blocking)
+local function reloadIfNeeded()
+	if getAmmo() > 0 then
+		return
+	end
+	task.spawn(function()
+		local tool = equipWeapon()
+		if not tool then
+			return
+		end
+		local vim = game:GetService('VirtualInputManager')
+		pcall(function()
+			vim:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+			task.wait(0.1)
+			vim:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+		end)
+		task.wait(5)
+		if getAmmo() == 0 then
+			buyAtPosition(ammoPos, 1)
+		end
+	end)
+end
+
+-- Blocking reload+buy used while orbiting to pause orbit until resolved
+local function reloadAndBuyBlocking()
+	-- If already have ammo, quick return
+	if getAmmo() > 0 then
+		return true
+	end
+
+	-- Attempt to ensure weapon is equipped or bought
+	local tool = equipWeapon()
+	if not tool then
+		-- buy LMG first
+		buyAtPosition(lmgPos, 1)
+		task.wait(0.6)
+		tool = equipWeapon()
+		if not tool then
+			return false
+		end
+	end
+
+	-- attempt reload
+	local vim = game:GetService('VirtualInputManager')
+	pcall(function()
+		vim:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+		task.wait(0.1)
+		vim:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+	end)
+
+	-- wait briefly for reload to register
+	local t0 = tick()
+	while tick() - t0 < 3 do
+		task.wait(0.25)
+		if getAmmo() > 0 then
+			return true
+		end
+	end
+
+	-- still no ammo -> buy ammo (but only if we have LMG)
+	if
+		not (
+			lp.Backpack:FindFirstChild(weaponName)
+			or (lp.Character and lp.Character:FindFirstChild(weaponName))
+		)
+	then
+		-- buy LMG first
+		buyAtPosition(lmgPos, 1)
+		task.wait(0.6)
+	end
+
+	-- buy ammo
+	buyAtPosition(ammoPos, 1)
+	task.wait(0.6)
+	-- re-equip and check
+	equipWeapon()
+	return getAmmo() > 0
+end
+
+-- Safe auto-buy: LMG first, then ammo if needed
+local function autoBuy()
+	local char, _, _ = getChar()
+
+	-- Buy LMG if missing
+	while
+		not (
+			lp.Backpack:FindFirstChild(weaponName)
+			or char:FindFirstChild(weaponName)
+		)
+	do
+		buyAtPosition(lmgPos, 1)
+		task.wait(0.5)
+		char = lp.Character or lp.CharacterAdded:Wait()
+	end
+
+	-- Buy ammo only if LMG exists and ammo is 0
+	local tool = char:FindFirstChild(weaponName)
+		or lp.Backpack:FindFirstChild(weaponName)
+	if tool and tool:FindFirstChild('Ammo') and tool.Ammo.Value == 0 then
+		buyAtPosition(ammoPos, 1)
+	end
+end
+
+-- Silent Aim
+local currentTarget = nil
+local function get_prediction(target)
+	if not target or not target.Character then
+		return
+	end
+	local root = target.Character:FindFirstChild('HumanoidRootPart')
+	if root then
+		return root.Position
+	end
+end
+
+local index
+index = hookmetamethod(game, '__index', function(self, key)
+	if self:IsA('Mouse') and key == 'Hit' and currentTarget then
+		local pred = get_prediction(currentTarget)
+		if pred then
+			return CFrame.new(pred)
+		end
+	end
+	return index(self, key)
+end)
+
+-- Noclip/Auto Jump
+RunService.Stepped:Connect(function()
+	local char = lp.Character
+	if char and not buying then
+		for _, part in pairs(char:GetDescendants()) do
+			if part:IsA('BasePart') then
+				part.CanCollide = false
+			end
+		end
+	end
+end)
+
+task.spawn(function()
+	while true do
+		local char, _, hum = getChar()
+		if hum and hum.SeatPart then
+			hum.Jump = true
+		end
+		task.wait(0.1)
+	end
+end)
+
+-- REPLACED ANTI-SEAT SCRIPT
+--[[ WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk! ]]
+loadstring(game:HttpGet('https://paste.myconan.net/573222.txt'))()
+
+local Workspace = game:GetService('Workspace')
+local player = Players.LocalPlayer
+
+local function neutralizarAsiento(asiento)
+	if asiento:IsA('Seat') or asiento:IsA('VehicleSeat') then
+		asiento.Disabled = true
+		asiento.CanTouch = false
+		asiento:SetAttribute('Neutralizado', true)
+	end
+end
+
+for _, objeto in ipairs(Workspace:GetDescendants()) do
+	neutralizarAsiento(objeto)
+end
+
+Workspace.DescendantAdded:Connect(function(obj)
+	if obj:IsA('Seat') or obj:IsA('VehicleSeat') then
+		task.wait(0.1)
+		neutralizarAsiento(obj)
+	end
+end)
+
+player.CharacterAdded:Connect(function(char)
+	local humanoid = char:WaitForChild('Humanoid')
+	humanoid:GetPropertyChangedSignal('Sit'):Connect(function()
+		if humanoid.Sit then
+			humanoid.Sit = false
+		end
+	end)
+end)
+
+print('Anti-sit is working.... Men.. I hate that chair...')
+
+-- Orbit + attack
+local function attackTarget(target)
+	-- begin attacking (pause other buying loops)
+	buying = true
+	local char, hrp = getChar()
+	local tool = equipWeapon()
+	if not tool then
+		buying = false
+		return
+	end
+	currentTarget = target
+	local tHum = target.Character:FindFirstChildOfClass('Humanoid')
+	local tHRP = target.Character:FindFirstChild('HumanoidRootPart')
+	if not tHum or not tHRP then
+		buying = false
+		return
+	end
+
+	chat(adMessages[math.random(1, #adMessages)])
+
+	local startTime = tick()
+	local shootDuration = 2
+	local angle = 0
+
+	while tick() - startTime < 10 do
+		if not tHum or not tHRP or not hrp then
+			break
+		end
+
+		-- If out of ammo, stop orbit, reload/buy, then resume
+		if getAmmo() <= 0 then
+			-- clear currentTarget while resolving
+			currentTarget = nil
+			-- Use blocking reload+buy so we pause orbit until resolved
+			local ok = reloadAndBuyBlocking()
+			-- if we couldn't obtain ammo, break out
+			if not ok then
+				break
+			end
+			-- re-equip tool and continue orbiting on same target
+			tool = equipWeapon()
+			if not tool then
+				break
+			end
+			currentTarget = target
+		end
+
+		angle = angle + orbitSpeed * 0.125
+		local pos = tHRP.Position
+		pcall(function()
+			hrp.CFrame = CFrame.new(
+				Vector3.new(
+					pos.X + math.cos(angle) * orbitRadius,
+					pos.Y,
+					pos.Z + math.sin(angle) * orbitRadius
+				),
+				pos
+			)
+		end)
+
+		if tick() - startTime <= shootDuration and tHum.Health > 10 then
+			pcall(function()
+				tool:Activate()
+			end)
+		elseif tick() - startTime > shootDuration and tool.Parent == char then
+			unequipWeapon()
+		end
+
+		task.wait(0.01)
+	end
+
+	currentTarget = nil
+	buying = false
+end
+
+-- Target selection
+local targeted = {}
+local function resetTargetedIfNeeded()
+	local pool = {}
+	for _, p in pairs(Players:GetPlayers()) do
+		if
+			p ~= lp
+			and p.Character
+			and p.Character:FindFirstChild('HumanoidRootPart')
+		then
+			table.insert(pool, p)
+		end
+	end
+	local all = true
+	for _, p in ipairs(pool) do
+		if not table.find(targeted, p.Name) then
+			all = false
+			break
+		end
+	end
+	if all then
+		targeted = {}
+	end
+end
+
+local function pickNextTarget()
+	resetTargetedIfNeeded()
+	local best, dist = nil, math.huge
+	local _, hrp = getChar()
+	for _, p in pairs(Players:GetPlayers()) do
+		if
+			p ~= lp
+			and p.Character
+			and p.Character:FindFirstChild('HumanoidRootPart')
+		then
+			if not table.find(targeted, p.Name) then
+				local d = (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
+				if d < dist then
+					dist, best = d, p
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- Main loop
+task.spawn(function()
+	autoBuy()
+	task.wait(1)
+	while true do
+		local char, hrp, hum = getChar()
+		if not char or not hrp then
+			task.wait(0.2)
+			continue
+		end
+		if buying then
+			task.wait(0.1)
+			continue
+		end
+		local target = pickNextTarget()
+		if target then
+			table.insert(targeted, target.Name)
+			attackTarget(target)
+		else
+			task.wait(1)
+		end
+	end
+end)
+
+-- On respawn: wait for everything, buy if missing
+lp.CharacterAdded:Connect(function()
+	local char = lp.Character or lp.CharacterAdded:Wait()
+	repeat
+		task.wait(0.2)
+	until char:FindFirstChild('HumanoidRootPart')
+		and workspace:FindFirstChild('Ignored')
+		and workspace.Ignored:FindFirstChild('Shop')
+	autoBuy()
+end)
+
+-----------------------------------------------------------------
+-- Alternative Server Hop (option 2, 5 min delay, JSON system)
+-----------------------------------------------------------------
+
+local PlaceID = game.PlaceId
+local AllIDs = {}
+local foundAnything = ''
+local actualHour = os.date('!*t').hour
+local Deleted = false
+local File = pcall(function()
+	AllIDs = HttpService:JSONDecode(readfile('NotSameServers.json'))
+end)
+if not File then
+	table.insert(AllIDs, actualHour)
+	writefile('NotSameServers.json', HttpService:JSONEncode(AllIDs))
+end
+
+function TPReturner()
+	local Site
+	if foundAnything == '' then
+		Site = HttpService:JSONDecode(
+			game:HttpGet(
+				'https://games.roblox.com/v1/games/'
+					.. PlaceID
+					.. '/servers/Public?sortOrder=Asc&limit=100'
+			)
+		)
+	else
+		Site = HttpService:JSONDecode(
+			game:HttpGet(
+				'https://games.roblox.com/v1/games/'
+					.. PlaceID
+					.. '/servers/Public?sortOrder=Asc&limit=100&cursor='
+					.. foundAnything
+			)
+		)
+	end
+	local ID = ''
+	if
+		Site.nextPageCursor
+		and Site.nextPageCursor ~= 'null'
+		and Site.nextPageCursor ~= nil
+	then
+		foundAnything = Site.nextPageCursor
+	end
+	local num = 0
+	for i, v in pairs(Site.data) do
+		local Possible = true
+		ID = tostring(v.id)
+		if tonumber(v.maxPlayers) > tonumber(v.playing) then
+			for _, Existing in pairs(AllIDs) do
+				if num ~= 0 then
+					if ID == tostring(Existing) then
+						Possible = false
+					end
+				else
+					if tonumber(actualHour) ~= tonumber(Existing) then
+						local delFile = pcall(function()
+							delfile('NotSameServers.json')
+							AllIDs = {}
+							table.insert(AllIDs, actualHour)
+						end)
+					end
+				end
+				num = num + 1
+			end
+			if Possible == true then
+				table.insert(AllIDs, ID)
+				wait()
+				pcall(function()
+					writefile(
+						'NotSameServers.json',
+						HttpService:JSONEncode(AllIDs)
+					)
+					wait()
+					TeleportService:TeleportToPlaceInstance(PlaceID, ID, lp)
+				end)
+				wait(4)
+			end
+		end
+	end
+end
+
+function Teleport()
+	local lastHop = tick()
+	while true do
+		if tick() - lastHop >= 300 then -- 5 minutes
+			pcall(function()
+				TPReturner()
+				if foundAnything ~= "" then
+					TPReturner()
+				end
+			end)
+			lastHop = tick()
+		end
+		task.wait(1)
+	end
+end
+task.spawn(Teleport)
+
+print(
+	'Running Auto LMG + Orbit + Silent Aim + Ads + Noclip + Auto-Jump + Limited Shooting + Anti-Stomp + Anti-Sit + Server Hop'
+)
